@@ -13,6 +13,14 @@ builder.Services
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers.XFrameOptions = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    await next();
+});
+app.UseRateLimiter();
 app.UseStaticFiles();
 app.UseAntiforgery();
 

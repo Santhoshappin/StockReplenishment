@@ -9,14 +9,14 @@ public record PagedResult<T>(List<T> Items, int TotalCount);
 public record CreateRequestDto(
     [Required] Guid LocationId,
     Priority Priority,
-    [MinLength(1, ErrorMessage = "At least one line item is required.")] List<CreateLineDto> Lines);
+    [MinLength(1, ErrorMessage = "At least one line item is required."), MaxLength(100)] List<CreateLineDto> Lines);
 
 public record CreateLineDto(
-    [Required] string ArticleNumber,
-    [Required] string Description,
-    [Range(1, int.MaxValue)] int RequestedQuantity);
+    [Required, StringLength(50)] string ArticleNumber,
+    [Required, StringLength(200)] string Description,
+    [Range(1, 1_000_000)] int RequestedQuantity);
 
-public record RejectDto([Required] string Reason);
+public record RejectDto([Required, StringLength(500)] string Reason);
 
 public record FulfillDto([Required] List<FulfillLineDto> Lines);
 public record FulfillLineDto(Guid LineItemId, [Range(0, int.MaxValue)] int FulfilledQuantity);

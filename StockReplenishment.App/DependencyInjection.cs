@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components;
 using MudBlazor.Services;
 using StockReplenishment.App.Frontend;
@@ -27,6 +28,18 @@ public static class DependencyInjection
             .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
         services.AddExceptionHandler<DomainExceptionHandler>();
         services.AddProblemDetails();
+        services.AddRateLimiter(o =>
+        {
+            o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 100,
+                        Window = TimeSpan.FromSeconds(10),
+                    }));
+        });
         return services;
     }
 
