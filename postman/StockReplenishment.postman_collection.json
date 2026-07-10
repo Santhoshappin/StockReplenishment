@@ -1,0 +1,343 @@
+{
+  "info": {
+    "name": "Stock Replenishment API",
+    "description": "End-to-end collection for the Stock Replenishment Request API.\n\nRun '1. Setup' first — it captures user and location ids into collection variables automatically. Then run the '2. Request workflow' folder top to bottom. Every write endpoint requires the X-User-Id header (the acting user); role rules are enforced server-side.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "workerId", "value": "" },
+    { "key": "reviewerId", "value": "" },
+    { "key": "locationId", "value": "" },
+    { "key": "requestId", "value": "" },
+    { "key": "lineItemId", "value": "" },
+    { "key": "newLocationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Setup",
+      "item": [
+        {
+          "name": "Get users (captures workerId + reviewerId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const users = pm.response.json();",
+                  "pm.collectionVariables.set('workerId', users.find(u => u.role === 'Worker').id);",
+                  "pm.collectionVariables.set('reviewerId', users.find(u => u.role === 'Reviewer').id);",
+                  "pm.test('users returned', () => pm.expect(users.length).to.be.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users"
+          }
+        },
+        {
+          "name": "Get locations (captures locationId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const locations = pm.response.json();",
+                  "pm.collectionVariables.set('locationId', locations[0].id);",
+                  "pm.test('locations returned', () => pm.expect(locations.length).to.be.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/locations"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Request workflow",
+      "item": [
+        {
+          "name": "List requests (paged + filters)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/requests?page=1&pageSize=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "requests"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "10" },
+                { "key": "status", "value": "Submitted", "disabled": true },
+                { "key": "priority", "value": "Urgent", "disabled": true },
+                { "key": "locationId", "value": "{{locationId}}", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create request as worker (captures requestId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('requestId', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-User-Id", "value": "{{workerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"priority\": \"Urgent\",\n  \"lines\": [\n    {\n      \"articleNumber\": \"PM-100\",\n      \"description\": \"Hex bolts M8\",\n      \"requestedQuantity\": 25\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/requests"
+          }
+        },
+        {
+          "name": "Get request by id (captures lineItemId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.collectionVariables.set('lineItemId', pm.response.json().lines[0].id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/requests/{{requestId}}"
+          }
+        },
+        {
+          "name": "Submit request as worker (202 Accepted)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('202 Accepted — stock check runs in background', () => pm.response.to.have.status(202));",
+                  "pm.test('stock check is Pending', () => pm.expect(pm.response.json().stockCheck).to.eql('Pending'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-User-Id", "value": "{{workerId}}" }],
+            "url": "{{baseUrl}}/api/requests/{{requestId}}/submit"
+          }
+        },
+        {
+          "name": "Poll stock check result (rerun until not Pending)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/requests/{{requestId}}"
+          }
+        },
+        {
+          "name": "Approve as reviewer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-User-Id", "value": "{{reviewerId}}" }],
+            "url": "{{baseUrl}}/api/requests/{{requestId}}/approve"
+          }
+        },
+        {
+          "name": "Reject as reviewer (alternative to approve)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-User-Id", "value": "{{reviewerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Budget exceeded for this period.\"\n}"
+            },
+            "url": "{{baseUrl}}/api/requests/{{requestId}}/reject"
+          }
+        },
+        {
+          "name": "Fulfill as reviewer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-User-Id", "value": "{{reviewerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    {\n      \"lineItemId\": \"{{lineItemId}}\",\n      \"fulfilledQuantity\": 25\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/requests/{{requestId}}/fulfill"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Locations (reviewer only)",
+      "item": [
+        {
+          "name": "Create location (captures newLocationId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('newLocationId', pm.response.json().id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-User-Id", "value": "{{reviewerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"LINE-X\",\n  \"name\": \"Experimental line\"\n}"
+            },
+            "url": "{{baseUrl}}/api/locations"
+          }
+        },
+        {
+          "name": "Update location",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "X-User-Id", "value": "{{reviewerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"LINE-X\",\n  \"name\": \"Experimental line (renamed)\"\n}"
+            },
+            "url": "{{baseUrl}}/api/locations/{{newLocationId}}"
+          }
+        },
+        {
+          "name": "Delete location (204 No Content)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-User-Id", "value": "{{reviewerId}}" }],
+            "url": "{{baseUrl}}/api/locations/{{newLocationId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Error scenarios",
+      "item": [
+        {
+          "name": "Create without X-User-Id → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"priority\": \"Low\",\n  \"lines\": [\n    {\n      \"articleNumber\": \"PM-101\",\n      \"description\": \"Washers\",\n      \"requestedQuantity\": 5\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/requests"
+          }
+        },
+        {
+          "name": "Approve as creator → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden — creator cannot approve own request', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-User-Id", "value": "{{workerId}}" }],
+            "url": "{{baseUrl}}/api/requests/{{requestId}}/approve"
+          }
+        },
+        {
+          "name": "Manage locations as worker → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden — only reviewers manage locations', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-User-Id", "value": "{{workerId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"NOPE\",\n  \"name\": \"Should be rejected\"\n}"
+            },
+            "url": "{{baseUrl}}/api/locations"
+          }
+        },
+        {
+          "name": "Get unknown request → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/requests/00000000-0000-0000-0000-000000000001"
+          }
+        }
+      ]
+    }
+  ]
+}
