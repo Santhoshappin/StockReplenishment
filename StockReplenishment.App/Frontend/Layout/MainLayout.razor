@@ -1,0 +1,61 @@
+@inherits LayoutComponentBase
+@inject HttpClient Http
+@inject UserState UserState
+@inject IDialogService DialogService
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudText Typo="Typo.h6">Stock Replenishment</MudText>
+        <MudTooltip Text="Click for info about this portal">
+            <MudIconButton Icon="@Icons.Material.Filled.Info" Color="Color.Inherit"
+                           OnClick="ShowInfoAsync" aria-label="About this portal" />
+        </MudTooltip>
+        <MudSpacer />
+        <MudButton Href="/" Color="Color.Inherit">Requests</MudButton>
+        <MudButton Href="/create" Color="Color.Inherit">New Request</MudButton>
+        @if (_user?.Role == UserRole.Reviewer)
+        {
+            <MudButton Href="/locations" Color="Color.Inherit">Locations</MudButton>
+        }
+        <MudSelect T="AppUser" Value="_user" ValueChanged="OnUserChanged" Dense
+                   ToStringFunc="_displayUser"
+                   Style="max-width:230px" Class="ml-4" Label="Acting as">
+            @foreach (var user in _users)
+            {
+                <MudSelectItem Value="user">@user.Name (@user.Role)</MudSelectItem>
+            }
+        </MudSelect>
+    </MudAppBar>
+    <MudMainContent Class="pa-6">
+        <CascadingValue Value="_user">
+            @Body
+        </CascadingValue>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private List<AppUser> _users = [];
+    private AppUser? _user;
+    private readonly Func<AppUser?, string> _displayUser =
+        u => u is null ? "" : $"{u.Name} ({u.Role})";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Http.GetFromJsonAsync<List<AppUser>>("api/users", AppJson.Options) ?? [];
+        _user = _users.FirstOrDefault(u => u.Role == UserRole.Worker) ?? _users.FirstOrDefault();
+        UserState.SetUser(_user);
+    }
+
+    private void OnUserChanged(AppUser user)
+    {
+        _user = user;
+        UserState.SetUser(user);
+    }
+
+    private Task ShowInfoAsync() => DialogService.ShowAsync<InfoDialog>("About this portal");
+}

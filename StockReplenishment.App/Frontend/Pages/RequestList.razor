@@ -1,0 +1,92 @@
+@page "/"
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<MudText Typo="Typo.h5" Class="mb-4">Replenishment Requests</MudText>
+
+<MudStack Row Spacing="3" Class="mb-4" AlignItems="AlignItems.Center">
+    <MudSelect T="RequestStatus?" Label="Status" Value="_status" ValueChanged="v => SetFilter(() => _status = v)" Clearable Style="max-width:180px">
+        @foreach (var s in Enum.GetValues<RequestStatus>())
+        {
+            <MudSelectItem T="RequestStatus?" Value="s">@s</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="Priority?" Label="Priority" Value="_priority" ValueChanged="v => SetFilter(() => _priority = v)" Clearable Style="max-width:180px">
+        @foreach (var p in Enum.GetValues<Priority>())
+        {
+            <MudSelectItem T="Priority?" Value="p">@p</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="Guid?" Label="Location" Value="_locationId" ValueChanged="v => SetFilter(() => _locationId = v)" Clearable Style="max-width:220px">
+        @foreach (var l in _locations)
+        {
+            <MudSelectItem T="Guid?" Value="l.Id">@l.Code — @l.Name</MudSelectItem>
+        }
+    </MudSelect>
+</MudStack>
+
+<MudTable @ref="_table" T="RequestDto" ServerData="LoadPageAsync" Hover
+          OnRowClick="OpenDetail" RowStyle="cursor:pointer">
+    <HeaderContent>
+        <MudTh>Location</MudTh>
+        <MudTh>Created by</MudTh>
+        <MudTh>Priority</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Stock Check</MudTh>
+        <MudTh>Lines</MudTh>
+        <MudTh>Created</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.LocationCode</MudTd>
+        <MudTd>@context.CreatedByName</MudTd>
+        <MudTd>@context.Priority</MudTd>
+        <MudTd><MudChip T="string" Size="Size.Small" Color="StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+        <MudTd>@context.StockCheck</MudTd>
+        <MudTd>@context.Lines.Count</MudTd>
+        <MudTd>@context.CreatedAt.ToLocalTime().ToString("g")</MudTd>
+    </RowTemplate>
+    <NoRecordsContent>No requests match the current filters.</NoRecordsContent>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="[5, 10, 25]" />
+    </PagerContent>
+</MudTable>
+
+@code {
+    private MudTable<RequestDto>? _table;
+    private List<StockLocation> _locations = [];
+    private RequestStatus? _status;
+    private Priority? _priority;
+    private Guid? _locationId;
+
+    protected override async Task OnInitializedAsync() =>
+        _locations = await Http.GetFromJsonAsync<List<StockLocation>>("api/locations", AppJson.Options) ?? [];
+
+    private async Task<TableData<RequestDto>> LoadPageAsync(TableState state, CancellationToken ct)
+    {
+        var url = $"api/requests?page={state.Page + 1}&pageSize={state.PageSize}";
+        if (_status is not null) url += $"&status={_status}";
+        if (_priority is not null) url += $"&priority={_priority}";
+        if (_locationId is not null) url += $"&locationId={_locationId}";
+
+        var result = await Http.GetFromJsonAsync<PagedResult<RequestDto>>(url, AppJson.Options, ct);
+        return new TableData<RequestDto> { Items = result!.Items, TotalItems = result.TotalCount };
+    }
+
+    private void OpenDetail(TableRowClickEventArgs<RequestDto> row) =>
+        Nav.NavigateTo($"/requests/{row.Item!.Id}");
+
+    private Task SetFilter(Action apply)
+    {
+        apply();
+        return _table!.ReloadServerData();
+    }
+
+    private static Color StatusColor(RequestStatus status) => status switch
+    {
+        RequestStatus.Submitted => Color.Info,
+        RequestStatus.Approved => Color.Success,
+        RequestStatus.Rejected => Color.Error,
+        RequestStatus.Fulfilled => Color.Primary,
+        _ => Color.Default,
+    };
+}

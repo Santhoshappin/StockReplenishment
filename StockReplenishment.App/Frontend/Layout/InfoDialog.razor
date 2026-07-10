@@ -1,0 +1,46 @@
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3">
+            This portal lets factory workers ask for material refills when stock runs
+            low at their station, and lets reviewers approve those requests.
+        </MudText>
+        <MudList T="string" Dense>
+            <MudListItem Icon="@Icons.Material.Filled.Person">
+                Use <b>Acting as</b> (top right) to switch between a worker and a reviewer —
+                there is no login in this demo.
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.AddCircle">
+                A <b>worker</b> creates a request: pick a location and priority, add the
+                materials needed, and save it as a draft. Only the creator can submit it.
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.HourglassTop">
+                On <b>submit</b>, the system checks warehouse stock in the background.
+                It takes a few seconds — the page updates by itself with
+                <b>Available</b> or <b>Shortfall</b> per item.
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.HowToReg">
+                A <b>reviewer</b> (someone other than the creator) then approves or rejects
+                the request. A rejection always needs a reason.
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.LocalShipping">
+                Approved requests are marked <b>fulfilled</b> with the quantities actually
+                delivered per item.
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.Place">
+                Reviewers can also add, rename, or remove <b>stock locations</b>
+                (Locations in the top bar).
+            </MudListItem>
+            <MudListItem Icon="@Icons.Material.Filled.FilterList">
+                The <b>Requests</b> page lists everything and can be filtered by status,
+                priority, and location.
+            </MudListItem>
+        </MudList>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" OnClick="() => Dialog.Close()">Got it</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+}

@@ -1,0 +1,176 @@
+@page "/requests/{Id:guid}"
+@implements IDisposable
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+
+@if (_request is null)
+{
+    <MudProgressCircular Indeterminate />
+}
+else
+{
+    <MudStack Row AlignItems="AlignItems.Center" Spacing="3" Class="mb-4">
+        <MudText Typo="Typo.h5">Request @_request.LocationCode</MudText>
+        <MudChip T="string" Color="Color.Info">@_request.Status</MudChip>
+        <MudChip T="string" Variant="Variant.Outlined">@_request.Priority</MudChip>
+    </MudStack>
+
+    <MudPaper Class="pa-4 mb-4" Style="max-width:900px">
+        <MudText><b>Location:</b> @_request.LocationCode — @_request.LocationName</MudText>
+        <MudText><b>Created by:</b> @_request.CreatedByName, @_request.CreatedAt.ToLocalTime().ToString("g")</MudText>
+        <MudStack Row AlignItems="AlignItems.Center" Spacing="2">
+            <MudText><b>Stock check:</b> @_request.StockCheck</MudText>
+            @if (_request.StockCheck == StockCheckStatus.Pending)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate />
+                <MudText Typo="Typo.body2">Checking availability…</MudText>
+            }
+        </MudStack>
+        @if (_request.RejectionReason is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-2">Rejected: @_request.RejectionReason</MudAlert>
+        }
+    </MudPaper>
+
+    <MudTable T="LineDto" Items="_request.Lines" Class="mb-4" Style="max-width:900px">
+        <HeaderContent>
+            <MudTh>Article</MudTh>
+            <MudTh>Description</MudTh>
+            <MudTh>Requested</MudTh>
+            <MudTh>Available</MudTh>
+            <MudTh>Fulfilled</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.ArticleNumber</MudTd>
+            <MudTd>@context.Description</MudTd>
+            <MudTd>@context.RequestedQuantity</MudTd>
+            <MudTd>@(context.AvailableQuantity?.ToString() ?? "—")</MudTd>
+            <MudTd>
+                @if (_request.Status == RequestStatus.Approved && CanReview)
+                {
+                    <MudNumericField T="int" Value="_fulfillQty[context.Id]"
+                                     ValueChanged="v => _fulfillQty[context.Id] = v"
+                                     Min="0" Max="context.RequestedQuantity" Style="max-width:100px" />
+                }
+                else
+                {
+                    @(context.FulfilledQuantity?.ToString() ?? "—")
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    <MudStack Spacing="2" Style="max-width:900px">
+        <MudStack Row Spacing="2">
+            @if (_request.Status == RequestStatus.Draft && IsCreator)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy"
+                           OnClick="@(() => PostAsync("submit"))">Submit</MudButton>
+            }
+            @if (_request.Status == RequestStatus.Submitted && CanReview)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success" Disabled="_busy"
+                           OnClick="@(() => PostAsync("approve"))">Approve</MudButton>
+                <MudTextField @bind-Value="_rejectReason" Label="Rejection reason" Style="max-width:300px" />
+                <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="_busy"
+                           OnClick="@(() => PostAsync("reject", new RejectDto(_rejectReason ?? "")))">Reject</MudButton>
+            }
+            @if (_request.Status == RequestStatus.Approved && CanReview)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="FulfillAsync">
+                    Mark Fulfilled
+                </MudButton>
+            }
+        </MudStack>
+        @if (PermissionHint is { } hint)
+        {
+            <MudAlert Severity="Severity.Info" Dense>@hint</MudAlert>
+        }
+    </MudStack>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [CascadingParameter] private AppUser? CurrentUser { get; set; }
+
+    private RequestDto? _request;
+    private string? _rejectReason;
+    private bool _busy;
+    private readonly Dictionary<Guid, int> _fulfillQty = [];
+    private readonly CancellationTokenSource _cts = new();
+
+    private bool IsCreator => CurrentUser?.Id == _request?.CreatedById;
+    private bool CanReview => CurrentUser is { Role: UserRole.Reviewer } && !IsCreator;
+
+    private string? PermissionHint => _request?.Status switch
+    {
+        RequestStatus.Draft when !IsCreator =>
+            $"Only the creator ({_request.CreatedByName}) can submit this draft — switch user in the top bar.",
+        RequestStatus.Submitted or RequestStatus.Approved when !CanReview =>
+            "Approving, rejecting and fulfilling require a reviewer who is not the creator — switch user in the top bar.",
+        _ => null,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        if (_request?.StockCheck == StockCheckStatus.Pending)
+            _ = PollWhilePendingAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _request = await Http.GetFromJsonAsync<RequestDto>($"api/requests/{Id}", AppJson.Options);
+        if (_request is { Status: RequestStatus.Approved })
+            foreach (var line in _request.Lines)
+                _fulfillQty.TryAdd(line.Id, Math.Min(line.RequestedQuantity, line.AvailableQuantity ?? line.RequestedQuantity));
+    }
+
+    private async Task PollWhilePendingAsync()
+    {
+        try
+        {
+            while (_request?.StockCheck == StockCheckStatus.Pending)
+            {
+                await Task.Delay(2000, _cts.Token);
+                await RefreshAsync();
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task PostAsync(string action, object? body = null)
+    {
+        _busy = true;
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.PostAsJsonAsync($"api/requests/{Id}/{action}", body, AppJson.Options);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            await RefreshAsync();
+            if (_request?.StockCheck == StockCheckStatus.Pending)
+                _ = PollWhilePendingAsync();
+        }
+        else
+        {
+            Snackbar.Add(await ApiError.ReadAsync(response), Severity.Error);
+        }
+    }
+
+    private Task FulfillAsync() => PostAsync("fulfill",
+        new FulfillDto(_fulfillQty.Select(kv => new FulfillLineDto(kv.Key, kv.Value)).ToList()));
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

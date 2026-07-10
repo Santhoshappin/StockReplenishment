@@ -1,0 +1,98 @@
+@page "/create"
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudText Typo="Typo.h5" Class="mb-4">New Replenishment Request</MudText>
+
+<MudPaper Class="pa-6" Style="max-width:800px">
+    <MudStack Spacing="4">
+        @if (CurrentUser is not null)
+        {
+            <MudText Typo="Typo.body2">Requesting as <b>@CurrentUser.Name</b></MudText>
+        }
+
+        <MudSelect T="Guid?" Label="Stock location" @bind-Value="_locationId" Required>
+            @foreach (var l in _locations)
+            {
+                <MudSelectItem T="Guid?" Value="l.Id">@l.Code — @l.Name</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudSelect T="Priority" Label="Priority" @bind-Value="_priority">
+            @foreach (var p in Enum.GetValues<Priority>())
+            {
+                <MudSelectItem Value="p">@p</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudText Typo="Typo.h6">Line items</MudText>
+        @foreach (var line in _lines)
+        {
+            <MudStack Row Spacing="2" AlignItems="AlignItems.Center">
+                <MudTextField @bind-Value="line.ArticleNumber" Label="Article number" Required />
+                <MudTextField @bind-Value="line.Description" Label="Description" Required />
+                <MudNumericField @bind-Value="line.Quantity" Label="Quantity" Min="1" Style="max-width:120px" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                               OnClick="() => _lines.Remove(line)" Disabled="_lines.Count == 1" />
+            </MudStack>
+        }
+        <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="() => _lines.Add(new())">Add line</MudButton>
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="_saving">
+            Save as Draft
+        </MudButton>
+    </MudStack>
+</MudPaper>
+
+@code {
+    private class LineInput
+    {
+        public string ArticleNumber { get; set; } = "";
+        public string Description { get; set; } = "";
+        public int Quantity { get; set; } = 1;
+    }
+
+    [CascadingParameter] private AppUser? CurrentUser { get; set; }
+
+    private List<StockLocation> _locations = [];
+    private Guid? _locationId;
+    private Priority _priority = Priority.Normal;
+    private readonly List<LineInput> _lines = [new()];
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync() =>
+        _locations = await Http.GetFromJsonAsync<List<StockLocation>>("api/locations", AppJson.Options) ?? [];
+
+    private async Task SaveAsync()
+    {
+        if (_locationId is null || _lines.Any(l => string.IsNullOrWhiteSpace(l.ArticleNumber) || string.IsNullOrWhiteSpace(l.Description)))
+        {
+            Snackbar.Add("Pick a location and fill in every line item.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        var dto = new CreateRequestDto(_locationId.Value, _priority,
+            _lines.Select(l => new CreateLineDto(l.ArticleNumber, l.Description, l.Quantity)).ToList());
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.PostAsJsonAsync("api/requests", dto, AppJson.Options);
+        }
+        finally
+        {
+            _saving = false;
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            var created = await response.Content.ReadFromJsonAsync<RequestDto>(AppJson.Options);
+            Nav.NavigateTo($"/requests/{created!.Id}");
+        }
+        else
+        {
+            Snackbar.Add(await ApiError.ReadAsync(response), Severity.Error);
+        }
+    }
+}
